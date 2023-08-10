@@ -1,89 +1,95 @@
 package main
 
 import (
-	"github.com/Hana-ame/tun-over-kcp/utils"
-	"github.com/gin-gonic/gin"
+	"crypto/sha1"
+	"log"
+	"net"
+	"time"
+
+	"github.com/xtaci/kcp-go/v5"
+	"golang.org/x/crypto/pbkdf2"
 )
 
-type ServerInfo struct {
-	IP   string
-	Info string
+func onError(err error) {
+	if err != nil {
+		panic(err)
+	}
 }
-
-var (
-	infoMap = utils.NewLockedMap()
-	listMap = utils.NewLockedMap()
-)
-
-// usage:
-// POST /[key]?addr=[server_ip]
-// GET /[key]?addr=[server_ip]
-// GET /[key]/list
 
 func main() {
-	// Create a new Gin router
-	router := gin.Default()
-
-	// Define a route handler
-	router.POST("/:key", func(c *gin.Context) {
-		var o struct {
-			Key string `uri:"key"`
-		}
-		if err := c.ShouldBindUri(&o); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
-		}
-		key := o.Key
-		addr := c.Query("addr")
-		infoMap.Put(key, addr)
-		listMap.Put(key, []string{})
-		c.JSON(200, gin.H{
-			"message": "Hello, world!",
-		})
-	})
-
-	router.GET("/:key", func(c *gin.Context) {
-		var o struct {
-			Key string `uri:"key"`
-		}
-		if err := c.ShouldBindUri(&o); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
-		}
-		key := o.Key
-		addr := c.Query("addr")
-		if list, ok := listMap.Get(key); ok {
-			if l, ok := list.([]string); ok {
-				if len(l) > 128 { // 简易限制
-					l = []string{}
-				}
-				l = append(l, addr)
-				listMap.Put(key, l)
-			}
-		}
-		info, _ := infoMap.Get(key)
-		c.JSON(200, info)
-	})
-
-	router.GET("/:key/list", func(c *gin.Context) {
-		var o struct {
-			Key string `uri:"key"`
-		}
-		if err := c.ShouldBindUri(&o); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
-		}
-		key := o.Key
-		if list, ok := listMap.Get(key); ok {
-			if l, ok := list.([]string); ok {
-				listMap.Put(key, []string{})
-				c.JSON(200, l)
-				return
-			}
-		}
-		c.JSON(404, gin.H{"error": "not found"})
-	})
-
-	// Run the server
-	router.Run("127.99.0.1:8080")
+	go server()
+	client("")
 }
+
+func server() {
+
+	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:12345")
+	conn, _ := net.ListenUDP("udp", addr)
+	go func() {
+		for {
+			time.Sleep(time.Second / 4)
+			conn.WriteToUDP([]byte{}, addr)
+		}
+	}()
+
+	key := pbkdf2.Key([]byte("demo pass"), []byte("demo salt"), 1024, 32, sha1.New)
+	block, _ := kcp.NewAESBlockCrypt(key)
+	listener, err := kcp.ServeConn(block, 10, 3, conn)
+	onError(err)
+	for {
+		s, err := listener.AcceptKCP()
+		onError(err)
+		go handleEcho(s)
+	}
+}
+
+// handleEcho send back everything it received
+func handleEcho(conn *kcp.UDPSession) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		n, err = conn.Write(buf[:n])
+		if err != nil {
+			log.Println(err)
+			return
+		}
+	}
+}
+
+// func client() {
+// 	key := pbkdf2.Key([]byte("demo pass"), []byte("demo salt"), 1024, 32, sha1.New)
+// 	block, _ := kcp.NewAESBlockCrypt(key)
+
+// 	// wait for server to become ready
+// 	time.Sleep(time.Second)
+
+// 	conn, err := net.ListenUDP("udp", nil)
+// 	onError(err)
+
+// 	// dial to the echo server
+// 	if sess, err := kcp.NewConn("127.0.0.1:12345", block, 10, 3, conn); err == nil {
+// 		for {
+// 			data := time.Now().String()
+// 			buf := make([]byte, len(data))
+// 			log.Println("sent:", data)
+// 			if _, err := sess.Write([]byte(data)); err == nil {
+// 				// read back the data
+// 				if _, err := io.ReadFull(sess, buf); err == nil {
+// 					log.Println("recv:", string(buf))
+// 				} else {
+// 					log.Fatal(err)
+// 				}
+// 			} else {
+// 				log.Fatal(err)
+// 			}
+// 			time.Sleep(time.Second)
+// 		}
+// 	} else {
+// 		log.Fatal(err)
+// 	}
+// }
