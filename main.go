@@ -1,77 +1,89 @@
 package main
 
 import (
-	"crypto/sha1"
-	"io"
-	"log"
-	"time"
-
-	"github.com/xtaci/kcp-go/v5"
-	"golang.org/x/crypto/pbkdf2"
+	"github.com/Hana-ame/tun-over-kcp/utils"
+	"github.com/gin-gonic/gin"
 )
 
+type ServerInfo struct {
+	IP   string
+	Info string
+}
+
+var (
+	infoMap = utils.NewLockedMap()
+	listMap = utils.NewLockedMap()
+)
+
+// usage:
+// POST /[key]?addr=[server_ip]
+// GET /[key]?addr=[server_ip]
+// GET /[key]/list
+
 func main() {
-	key := pbkdf2.Key([]byte("demo pass"), []byte("demo salt"), 1024, 32, sha1.New)
-	block, _ := kcp.NewAESBlockCrypt(key)
-	if listener, err := kcp.ListenWithOptions("127.0.0.1:12345", block, 10, 3); err == nil {
-		// spin-up the client
-		go client()
-		for {
-			s, err := listener.AcceptKCP()
-			if err != nil {
-				log.Fatal(err)
-			}
-			go handleEcho(s)
-		}
-	} else {
-		log.Fatal(err)
-	}
-}
+	// Create a new Gin router
+	router := gin.Default()
 
-// handleEcho send back everything it received
-func handleEcho(conn *kcp.UDPSession) {
-	buf := make([]byte, 4096)
-	for {
-		n, err := conn.Read(buf)
-		if err != nil {
-			log.Println(err)
+	// Define a route handler
+	router.POST("/:key", func(c *gin.Context) {
+		var o struct {
+			Key string `uri:"key"`
+		}
+		if err := c.ShouldBindUri(&o); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
+		key := o.Key
+		addr := c.Query("addr")
+		infoMap.Put(key, addr)
+		listMap.Put(key, []string{})
+		c.JSON(200, gin.H{
+			"message": "Hello, world!",
+		})
+	})
 
-		n, err = conn.Write(buf[:n])
-		if err != nil {
-			log.Println(err)
+	router.GET("/:key", func(c *gin.Context) {
+		var o struct {
+			Key string `uri:"key"`
+		}
+		if err := c.ShouldBindUri(&o); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
-	}
-}
-
-func client() {
-	key := pbkdf2.Key([]byte("demo pass"), []byte("demo salt"), 1024, 32, sha1.New)
-	block, _ := kcp.NewAESBlockCrypt(key)
-
-	// wait for server to become ready
-	time.Sleep(time.Second)
-
-	// dial to the echo server
-	if sess, err := kcp.DialWithOptions("127.0.0.1:12345", block, 10, 3); err == nil {
-		for {
-			data := time.Now().String()
-			buf := make([]byte, len(data))
-			log.Println("sent:", data)
-			if _, err := sess.Write([]byte(data)); err == nil {
-				// read back the data
-				if _, err := io.ReadFull(sess, buf); err == nil {
-					log.Println("recv:", string(buf))
-				} else {
-					log.Fatal(err)
+		key := o.Key
+		addr := c.Query("addr")
+		if list, ok := listMap.Get(key); ok {
+			if l, ok := list.([]string); ok {
+				if len(l) > 128 { // 简易限制
+					l = []string{}
 				}
-			} else {
-				log.Fatal(err)
+				l = append(l, addr)
+				listMap.Put(key, l)
 			}
-			time.Sleep(time.Second)
 		}
-	} else {
-		log.Fatal(err)
-	}
+		info, _ := infoMap.Get(key)
+		c.JSON(200, info)
+	})
+
+	router.GET("/:key/list", func(c *gin.Context) {
+		var o struct {
+			Key string `uri:"key"`
+		}
+		if err := c.ShouldBindUri(&o); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+		key := o.Key
+		if list, ok := listMap.Get(key); ok {
+			if l, ok := list.([]string); ok {
+				listMap.Put(key, []string{})
+				c.JSON(200, l)
+				return
+			}
+		}
+		c.JSON(404, gin.H{"error": "not found"})
+	})
+
+	// Run the server
+	router.Run(":8080")
 }
