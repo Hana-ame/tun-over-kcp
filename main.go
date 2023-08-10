@@ -85,5 +85,5 @@ func main() {
 	})
 
 	// Run the server
-	router.Run(":8080")
+	router.Run("127.99.0.1:8080")
 }
