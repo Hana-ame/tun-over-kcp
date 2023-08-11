@@ -7,7 +7,11 @@ import (
 )
 
 func TestClient(t *testing.T) {
-	go runPool("")
+	client("https://helper.moonchan.xyz/123", ":9002")
+}
+
+func TestClientPool(t *testing.T) {
+	go runPool("https://helper.moonchan.xyz/123")
 	time.Sleep(time.Second)
 	fmt.Println(pick())
 	fmt.Println(pick())

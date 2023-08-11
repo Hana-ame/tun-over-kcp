@@ -1,12 +1,16 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/Hana-ame/tun-over-kcp/utils"
+	"github.com/xtaci/kcp-go/v5"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 const N = 4
@@ -17,46 +21,36 @@ var (
 	orders = make(chan struct{}, N)
 	m      = make(map[string]*net.UDPConn)
 	mu     sync.Mutex
+	raddr  string
 )
 
+// works well
 func newConn() {
 	defer func() {
 		if err := recover(); err != nil {
 			orders <- struct{}{}
 		}
 	}()
-	buf := make([]byte, 1024)
 	conn, err := net.ListenUDP("udp", nil)
 	onError(err)
-	ch := make(chan string)
-	go func() {
-		utils.StunRequest("stun1.l.google.com:19302", conn)
-		n, _, err := conn.ReadFrom(buf)
-		onError(err)
-		s, err := utils.StunResolve(buf[:n])
-		onError(err)
-		ch <- s
-	}()
-	select {
-	case <-time.After(3 * time.Second):
-		defer conn.Close()
-		onError(fmt.Errorf("UDP read timeout"))
-	case s := <-ch:
-		pool <- conn
-		addrs <- s
-		mu.Lock()
-		m[s] = conn
-		fmt.Println("add", s)
-		mu.Unlock()
-	}
-
+	s, err := getStunIP(conn)
+	onError(err)
+	// got ip
+	pool <- conn
+	addrs <- s
+	mu.Lock()
+	m[s] = conn
+	// fmt.Println("add", s)
+	mu.Unlock()
 }
 
-func runPool(raddr string) {
-	for i := 0; i < N; i++ {
-		orders <- struct{}{}
-	}
+// it should be good
+func runPool(url string) {
+
 	go func() {
+		for i := 0; i < N; i++ {
+			orders <- struct{}{}
+		}
 		for {
 			<-orders
 			newConn()
@@ -70,6 +64,12 @@ func runPool(raddr string) {
 		// fmt.Println(m)
 		for key := range m {
 			m[key].WriteToUDP([]byte{}, uaddr)
+			resp, err := utils.Fetch("GET", url+"?addr="+key, nil, nil)
+			// fmt.Println("?raddr", raddr, err)
+			if err == nil {
+				decoder := json.NewDecoder(resp.Body)
+				_ = decoder.Decode(&raddr)
+			}
 		}
 		mu.Unlock()
 	}
@@ -86,7 +86,36 @@ func pick() *net.UDPConn {
 	return conn
 }
 
-func client(raddr string) {
-	go runPool(raddr)
+func clientDial() (*kcp.UDPSession, error) {
+	key := pbkdf2.Key([]byte("demo pass"), []byte("demo salt"), 1024, 32, sha1.New)
+	block, _ := kcp.NewAESBlockCrypt(key)
 
+	conn := pick()
+	fmt.Println("dial", raddr)
+	// io.ReadAll(conn)
+	// dial to the echo server
+	return kcp.NewConn(raddr, block, 10, 3, conn)
+}
+
+func client(url string, laddr string) {
+	go runPool(url)
+	ln, err := net.Listen("tcp", laddr)
+	onError(err)
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			panic(err)
+		}
+
+		go handleRequest(conn)
+	}
+}
+
+func handleRequest(conn net.Conn) {
+	proxy, err := clientDial()
+	onError(err)
+
+	fmt.Println("proxy connected")
+	go copyIO(conn, proxy)
+	go copyIO(proxy, conn)
 }
