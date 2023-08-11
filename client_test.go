@@ -7,7 +7,7 @@ import (
 )
 
 func TestClient(t *testing.T) {
-	client("https://helper.moonchan.xyz/123", ":9002")
+	client("https://helper.moonchan.xyz/123", ":8000")
 }
 
 func TestClientPool(t *testing.T) {

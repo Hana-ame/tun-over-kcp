@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
-const N = 4
+const N = 16
 
 var (
 	pool   = make(chan *net.UDPConn, N)
@@ -59,7 +59,7 @@ func runPool(url string) {
 		}
 		for {
 			<-orders
-			newConn(url)
+			go newConn(url)
 		}
 	}()
 
@@ -68,15 +68,21 @@ func runPool(url string) {
 		time.Sleep(time.Second)
 		mu.Lock()
 		// fmt.Println(m)
+		var wg sync.WaitGroup
 		for key := range m {
-			m[key].WriteToUDP([]byte{}, uaddr)
-			resp, err := utils.Fetch("GET", url+"?addr="+key, nil, nil)
-			// fmt.Println("?raddr", raddr, err)
-			if err == nil {
-				decoder := json.NewDecoder(resp.Body)
-				_ = decoder.Decode(&raddr)
-			}
+			wg.Add(1)
+			go func(key string) {
+				defer wg.Done()
+				m[key].WriteToUDP([]byte{}, uaddr)
+				resp, err := utils.Fetch("GET", url+"?addr="+key, nil, nil)
+				// fmt.Println("?raddr", raddr, err)
+				if err == nil {
+					decoder := json.NewDecoder(resp.Body)
+					_ = decoder.Decode(&raddr)
+				}
+			}(key)
 		}
+		wg.Wait()
 		mu.Unlock()
 	}
 }
