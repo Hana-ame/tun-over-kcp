@@ -20,4 +20,23 @@ client
 
 # known issue
 
-和vps连会过一段时间死掉，不知道为什么
+~~和vps连会过一段时间死掉，不知道为什么~~看上去解决了，也不知道为什么
+
+copyIO can err, dunno
+
+# change log
+
+## v0.1.1
+
+- 修改了一些log提示
+- 尝试给copyIO函数加上断开连接的提示信息，但失败了（所以server会不会因为conn关不掉溢出）
+- client端好像关了的，server端应该也会关吧。
+
+worked about 2 hours.
+### 测试
+
+在google的cloud shell上，配合http proxy工作得很好
+
+## v0.1.0
+
+通了

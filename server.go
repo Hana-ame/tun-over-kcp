@@ -66,21 +66,19 @@ func server(url string, laddr string) {
 		if err == nil {
 			go handleKCP(s, laddr)
 		} else {
-			fmt.Printf("%s", err)
+			fmt.Printf("error: %s\n", err)
 		}
 	}
 }
 
 // handleEcho send back everything it received
 func handleKCP(conn *kcp.UDPSession, laddr string) {
-	fmt.Println("new client")
-
 	proxy, err := net.Dial("tcp", laddr)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("proxy connected")
+	fmt.Printf("%s -> %s\n", conn.RemoteAddr().String(), proxy.RemoteAddr().String())
 	go copyIO(conn, proxy)
 	go copyIO(proxy, conn)
 }

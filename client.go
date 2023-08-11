@@ -25,7 +25,7 @@ var (
 )
 
 // works well
-func newConn() {
+func newConn(url string) {
 	defer func() {
 		if err := recover(); err != nil {
 			orders <- struct{}{}
@@ -35,6 +35,12 @@ func newConn() {
 	onError(err)
 	s, err := getStunIP(conn)
 	onError(err)
+	resp, err := utils.Fetch("GET", url+"?addr="+s, nil, nil)
+	onError(err)
+	if resp.StatusCode != 200 {
+		onError(fmt.Errorf("%s", "not success"))
+	}
+
 	// got ip
 	pool <- conn
 	addrs <- s
@@ -53,7 +59,7 @@ func runPool(url string) {
 		}
 		for {
 			<-orders
-			newConn()
+			newConn(url)
 		}
 	}()
 
@@ -80,7 +86,7 @@ func pick() *net.UDPConn {
 	conn := <-pool
 	mu.Lock()
 	delete(m, addr)
-	fmt.Println("delete", addr)
+	fmt.Printf("picked @ %s\n", addr)
 	mu.Unlock()
 	orders <- struct{}{}
 	return conn
@@ -91,7 +97,7 @@ func clientDial() (*kcp.UDPSession, error) {
 	block, _ := kcp.NewAESBlockCrypt(key)
 
 	conn := pick()
-	fmt.Println("dial", raddr)
+	fmt.Printf("dial %s -> %s\n", conn.LocalAddr().String(), raddr)
 	// io.ReadAll(conn)
 	// dial to the echo server
 	return kcp.NewConn(raddr, block, 10, 3, conn)
@@ -115,7 +121,7 @@ func handleRequest(conn net.Conn) {
 	proxy, err := clientDial()
 	onError(err)
 
-	fmt.Println("proxy connected")
+	fmt.Printf("%s -> %s\n", conn.LocalAddr().String(), proxy.LocalAddr().String())
 	go copyIO(conn, proxy)
 	go copyIO(proxy, conn)
 }

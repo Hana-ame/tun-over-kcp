@@ -41,9 +41,17 @@ func main() {
 }
 
 func copyIO(src, dest net.Conn) {
+	defer func() {
+		e := recover()
+		if e != nil {
+			fmt.Printf("copy: %s\n", e)
+		}
+	}()
 	defer src.Close()
 	defer dest.Close()
-	io.Copy(src, dest)
+	_, err := io.Copy(src, dest)
+	onError(err)
+	// fmt.Printf("copyIO: %s", err.Error())
 }
 
 func getStunIP(conn *net.UDPConn) (addr string, err error) {
