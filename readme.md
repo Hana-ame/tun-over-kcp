@@ -18,6 +18,12 @@ client
 ./tun-over-kcp.exe --client -laddr ":9000" -url "https://helper.moonchan.xyz/node"
 ```
 
+helper
+
+```sh   
+./proxy.bin -l ":8008"
+```
+
 # binary
 
 github的下载吃屎吧。
